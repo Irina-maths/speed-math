@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Гонка со временем — быстрый счёт</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel-2: #20242e;
+    --text: #e8ecf1;
+    --muted: #8b94a3;
+    --accent: #4cc9f0;
+    --good: #06d6a0;
+    --warn: #ffd166;
+    --bad: #ef476f;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .app {
+    max-width: 520px; margin: 0 auto;
+    min-height: 100%; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    position: relative;
+  }
+  header {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  }
+  .stat {
+    background: var(--panel); border-radius: 12px;
+    padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .stat .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; transition: color .3s; }
+  .stat .value.down { color: var(--bad); }
+  .stat .value.up { color: var(--good); }
+
+  .timer-bar {
+    height: 10px; border-radius: 999px; background: var(--panel);
+    overflow: hidden;
+  }
+  .timer-fill {
+    height: 100%; width: 100%; background: var(--good);
+    transition: background .3s, width .1s linear;
+  }
+  .timer-fill.warn { background: var(--warn); }
+  .timer-fill.bad  { background: var(--bad); }
+
+  .timer-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; color: var(--muted);
+    gap: 8px;
+  }
+  .timer-row .left  { display: flex; flex-direction: column; align-items: flex-start; }
+  .timer-row .right { display: flex; flex-direction: column; align-items: flex-end; }
+  #timerText { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  #sessionText { font-size: 16px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; transition: color .3s; }
+  #sessionText.warn { color: var(--warn); }
+  #sessionText.bad  { color: var(--bad); }
+
+  main {
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+    gap: 16px; padding: 8px 0;
+  }
+  .task {
+    font-size: clamp(48px, 14vw, 72px);
+    font-weight: 800;
+    text-align: center;
+    letter-spacing: 1px;
+    padding: 12px 0;
+    user-select: none;
+  }
+
+  #answer {
+    font-size: 40px; text-align: center;
+    padding: 14px; border-radius: 14px;
+    border: 2px solid var(--panel-2);
+    background: var(--panel); color: var(--text);
+    width: 100%; font-variant-numeric: tabular-nums;
+    outline: none; transition: border-color .2s;
+  }
+  #answer:focus { border-color: var(--accent); }
+  #answer:disabled { opacity: .5; }
+
+  .controls { display: flex; gap: 8px; justify-content: center; }
+  button {
+    font: inherit; font-size: 15px; font-weight: 600;
+    padding: 10px 18px; border-radius: 12px; border: none;
+    background: var(--panel-2); color: var(--text);
+    cursor: pointer; transition: transform .08s, background .2s, border-color .2s;
+  }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--accent); color: #0b1018; }
+  button.primary:hover { background: #6dd4f3; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  .feedback {
+    min-height: 48px; text-align: center; font-size: 14px;
+    color: var(--muted); line-height: 1.4;
+  }
+  .feedback.bad  { color: var(--bad); }
+  .feedback.good { color: var(--good); }
+
+  .flash {
+    position: fixed; inset: 0; pointer-events: none;
+    opacity: 0; transition: opacity .35s;
+  }
+  .flash.show { opacity: .25; transition: opacity 0s; }
+  .flash.good { background: var(--good); }
+  .flash.bad  { background: var(--bad); }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(10,12,16,.85);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; z-index: 10;
+    backdrop-filter: blur(6px);
+  }
+  .overlay.hidden { display: none; }
+  .overlay .card {
+    background: var(--panel); border-radius: 20px;
+    padding: 24px; max-width: 460px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .overlay h1 { margin: 0 0 12px; font-size: 26px; }
+  .overlay h2 { margin: 0 0 12px; font-size: 22px; }
+  .overlay p, .overlay li { color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .overlay ul { padding-left: 18px; margin: 8px 0; }
+  .overlay .big {
+    font-size: 44px; font-weight: 800; text-align: center;
+    margin: 8px 0; font-variant-numeric: tabular-nums;
+  }
+  .overlay .row { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; }
+  .overlay .row span:last-child { font-variant-numeric: tabular-nums; color: var(--text); }
+  .overlay .row.total { border-top: 1px solid var(--panel-2); margin-top: 6px; padding-top: 8px; font-weight: 700; }
+  .overlay .row.total span:last-child { color: var(--accent); }
+  .overlay hr { border: none; border-top: 1px solid var(--panel-2); margin: 12px 0; }
+  .overlay .actions { margin-top: 16px; display: flex; gap: 8px; }
+  .overlay .actions button { flex: 1; }
+
+  .diff-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 8px; margin: 12px 0;
+  }
+  .diff-btn {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 12px 10px; border-radius: 12px;
+    border: 2px solid var(--panel-2);
+    background: var(--panel-2); color: var(--text);
+    font-size: 15px; font-weight: 700; text-align: left;
+    align-items: flex-start; line-height: 1.2;
+  }
+  .diff-btn small {
+    font-size: 11px; font-weight: 500; color: var(--muted);
+  }
+  .diff-btn.active {
+    border-color: var(--accent);
+    background: rgba(76, 201, 240, .12);
+  }
+  .diff-btn.active small { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="stat"><span class="label">Очки</span><span class="value" id="score">0</span></div>
+    <div class="stat"><span class="label">Серия</span><span class="value" id="streak">0</span></div>
+    <div class="stat"><span class="label">Сложность</span><span class="value" id="prog">0%</span></div>
+    <div class="stat"><span class="label">Рекорд</span><span class="value" id="best">0</span></div>
+  </header>
+
+  <div class="timer-bar"><div class="timer-fill" id="timerFill"></div></div>
+  <div class="timer-row">
+    <div class="left">
+      <span>Осталось</span>
+      <span id="timerText">100.0</span>
+    </div>
+    <div class="right">
+      <span>Сессия</span>
+      <span id="sessionText">0:00 / 5:00</span>
+    </div>
+  </div>
+
+  <main>
+    <div class="task" id="task">—</div>
+    <input id="answer" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="?">
+    <div class="controls">
+      <button id="hintBtn">Подсказка (−2 с)</button>
+    </div>
+    <div class="feedback" id="feedback"></div>
+  </main>
+</div>
+
+<div class="flash" id="flash"></div>
+
+<!-- Стартовый экран -->
+<div class="overlay" id="startScreen">
+  <div class="card">
+    <h1>Гонка со временем</h1>
+    <p>Правильный ответ добавляет время и плавно усложняет примеры. Ошибка отнимает время и слегка откатывает сложность назад — по этому приёму отдельно. Сессия длится <b>до 5 минут</b>.</p>
+    <ul>
+      <li>Квадрат числа, оканчивающегося на 5</li>
+      <li>Квадрат через сумму/разность</li>
+      <li>Умножение на 11</li>
+    </ul>
+
+    <div class="diff-grid" id="diffGrid">
+      <button class="diff-btn" data-diff="easy">Легко<small>150 с · +5 с · −4 с</small></button>
+      <button class="diff-btn" data-diff="normal">Норма<small>100 с · +4 с · −5 с</small></button>
+      <button class="diff-btn" data-diff="hard">Сложно<small>75 с · +3 с · −5 с</small></button>
+      <button class="diff-btn" data-diff="insane">Хардкор<small>50 с · +3 с · −6 с</small></button>
+    </div>
+
+    <p>Рекорд на этой сложности: <b id="bestStart">0</b> очков</p>
+    <div class="actions">
+      <button class="primary" id="playBtn">Играть</button>
+    </div>
+  </div>
+</div>
+
+<!-- Финальный экран -->
+<div class="overlay hidden" id="endScreen">
+  <div class="card">
+    <h2 id="endTitle">Время вышло</h2>
+    <div class="big" id="finalScore">0</div>
+    <div class="row"><span>Причина</span><span id="finalReason">—</span></div>
+    <div class="row"><span>Сложность</span><span id="finalDiff">—</span></div>
+    <div class="row"><span>Общий рост</span><span id="finalProgress">0%</span></div>
+    <div class="row"><span>Правильных ответов</span><span id="finalCorrect">0</span></div>
+    <div class="row"><span>Ошибок</span><span id="finalWrong">0</span></div>
+    <div class="row"><span>Лучшая серия</span><span id="finalStreak">0</span></div>
+    <div class="row"><span>Точность</span><span id="finalAccuracy">—</span></div>
+    <div class="row"><span>Среднее время ответа</span><span id="finalAvg">—</span></div>
+    <div class="row"><span>Длительность сессии</span><span id="finalDuration">—</span></div>
+    <hr>
+    <div class="row"><span>…5² (решено / ошибок)</span><span id="statEnd5">0 / 0</span></div>
+    <div class="row"><span>…5² прогресс</span><span id="finalProgEnd5">0%</span></div>
+    <div class="row"><span>квадрат ± (решено / ошибок)</span><span id="statSq">0 / 0</span></div>
+    <div class="row"><span>квадрат ± прогресс</span><span id="finalProgSq">0%</span></div>
+    <div class="row"><span>×11 (решено / ошибок)</span><span id="statX11">0 / 0</span></div>
+    <div class="row"><span>×11 прогресс</span><span id="finalProgX11">0%</span></div>
+    <div class="row total"><span>Рекорд</span><span id="finalBest">0</span></div>
+    <div class="actions">
+      <button id="againBtn" class="primary">Ещё раз</button>
+      <button id="menuBtn">В меню</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+  const randInt = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  /* ---------- Сложности ---------- */
+  const DIFFICULTIES = {
+    easy:   { key: 'easy',   label: 'Легко',   start: 150, max: 240, penalty: 4, bonus: 5, growth: 18, regress: 0.3 },
+    normal: { key: 'normal', label: 'Норма',   start: 100, max: 180, penalty: 5, bonus: 4, growth: 12, regress: 0.5 },
+    hard:   { key: 'hard',   label: 'Сложно',  start: 75,  max: 150, penalty: 5, bonus: 3, growth: 9,  regress: 0.7 },
+    insane: { key: 'insane', label: 'Хардкор', start: 50,  max: 120, penalty: 6, bonus: 3, growth: 7,  regress: 1.0 }
+  };
+
+  /* ---------- Константы ---------- */
+  const SESSION_LIMIT_SEC = 300;   // 5 минут
+  const HINT_COST = 2;
+  const RECENT_LIMIT = 10;         // буфер недавних примеров
+  const ERROR_WEIGHT = 2;          // насколько ошибки повышают вес типа
+  const SMOOTH_WINDOW = 5;         // сглаживание доли ошибок
+
+  /* ---------- Прогресс ---------- */
+  function progress(count, K) {
+    return 1 - Math.exp(-count / K);
+  }
+
+  /* ---------- Рекорды ---------- */
+  function bestKey(k) { return 'speedmath_best_' + k; }
+  function getBest(k) {
+    try { return parseInt(localStorage.getItem(bestKey(k)) || '0', 10) || 0; }
+    catch (e) { return 0; }
+  }
+  function setBest(k, v) {
+    try { localStorage.setItem(bestKey(k), String(v)); } catch (e) {}
+  }
+
+  /* ---------- Формат времени ---------- */
+  function fmt(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  /* ---------- Генераторы задач ---------- */
+  function makeEnd5(p) {
+    const maxA = Math.max(1, Math.round(lerp(6, 9, p)));
+    const a = randInt(1, maxA);
+    const n = 10 * a + 5;
+    return {
+      type: 'end5',
+      key: 'end5:' + n,
+      text: n + '²',
+      answer: n * n,
+      hint: a + ' × ' + (a + 1) + ' = ' + (a * (a + 1)) + ', припиши 25'
+    };
+  }
+
+  function makeSquareNear(p) {
+    const baseMinTens = 2;
+    const baseMaxTens = Math.max(baseMinTens, Math.round(lerp(5, 9, p)));
+    const base = randInt(baseMinTens, baseMaxTens) * 10;
+
+    const dMax = Math.max(1, Math.round(lerp(2, 5, p)));
+    const d = randInt(1, dMax);
+
+    const sign = Math.random() < 0.5 ? -1 : 1;
+    const n = base + sign * d;
+    const b2 = base * base;
+    const cross = 2 * base * d;
+    const d2 = d * d;
+    const op = sign > 0 ? '+' : '−';
+    const hint = '(' + base + ' ' + op + ' ' + d + ')² = ' + base + '² '
+      + (sign > 0 ? '+' : '−') + ' 2·' + base + '·' + d + ' + ' + d + '² = '
+      + b2 + ' ' + (sign > 0 ? '+' : '−') + ' ' + cross + ' + ' + d2;
+    return { type: 'sq', key: 'sq:' + n, text: n + '²', answer: n * n, hint: hint };
+  }
+
+  function makeTimes11(p) {
+    const minN = 11;
+    const maxN = Math.max(minN, Math.round(lerp(49, 99, p)));
+    const carryChance = lerp(0, 0.75, p);
+
+    let n;
+    let guard = 0;
+    do {
+      n = randInt(minN, maxN);
+      const a = Math.floor(n / 10);
+      const b = n % 10;
+      const carry = a + b >= 10;
+      if (!carry) break;
+      if (Math.random() < carryChance) break;
+      guard++;
+    } while (guard < 30);
+
+    const a = Math.floor(n / 10);
+    const b = n % 10;
+    const s = a + b;
+    const hint = s >= 10
+      ? a + ' … (' + a + '+' + b + '=' + s + ') … ' + b + ' → перенос единицы влево'
+      : a + ' (' + a + '+' + b + '=' + s + ') ' + b;
+    return { type: 'x11', key: 'x11:' + n, text: n + ' × 11', answer: n * 11, hint: hint };
+  }
+
+  const GENERATORS_BY_TYPE = {
+    end5: makeEnd5,
+    sq:   makeSquareNear,
+    x11:  makeTimes11
+  };
+
+  /* ---------- Состояние ---------- */
+  let selectedDiff = (() => {
+    try {
+      const saved = localStorage.getItem('speedmath_diff');
+      if (saved && DIFFICULTIES[saved]) return saved;
+    } catch (e) {}
+    return 'normal';
+  })();
+
+  const state = {
+    running: false,
+    timeLeft: 0,
+    score: 0,
+    streak: 0,
+    bestStreak: 0,
+    current: null,
+    taskStart: 0,
+    lastTick: 0,
+    difficulty: DIFFICULTIES[selectedDiff],
+    progress: 0,
+    progressByType: { end5: 0, sq: 0, x11: 0 },
+    effectiveCountByType: { end5: 0, sq: 0, x11: 0 },
+    recentResults: { end5: [], sq: [], x11: [] },
+    recent: [],
+    stats: {
+      end5: { total: 0, correct: 0, wrong: 0, time: 0 },
+      sq:   { total: 0, correct: 0, wrong: 0, time: 0 },
+      x11:  { total: 0, correct: 0, wrong: 0, time: 0 }
+    },
+    totalCorrect: 0,
+    totalWrong: 0,
+    totalTimeCorrect: 0,
+    rafId: null,
+    locked: false,
+    progFlashTimer: null,
+    sessionStart: 0,
+    sessionElapsed: 0,
+    endReason: ''
+  };
+
+  /* ---------- DOM ---------- */
+  const el = {
+    score: $('score'),
+    streak: $('streak'),
+    prog: $('prog'),
+    best: $('best'),
+    task: $('task'),
+    answer: $('answer'),
+    feedback: $('feedback'),
+    hintBtn: $('hintBtn'),
+    timerFill: $('timerFill'),
+    timerText: $('timerText'),
+    sessionText: $('sessionText'),
+    flash: $('flash'),
+    startScreen: $('startScreen'),
+    endScreen: $('endScreen'),
+    diffGrid: $('diffGrid'),
+    bestStart: $('bestStart')
+  };
+
+  /* ---------- Хелперы ---------- */
+  function smoothedErrorRate(type) {
+    const arr = state.recentResults[type];
+    if (!arr.length) return 0;
+    const wrong = arr.filter(x => x === 0).length;
+    return wrong / arr.length;
+  }
+
+  function pushResult(type, correct) {
+    const arr = state.recentResults[type];
+    arr.push(correct ? 1 : 0);
+    if (arr.length > SMOOTH_WINDOW) arr.shift();
+  }
+
+  function pushRecent(key) {
+    state.recent.push(key);
+    if (state.recent.length > RECENT_LIMIT) state.recent.shift();
+  }
+
+  function recomputeAvgProgress() {
+    state.progress = (
+      state.progressByType.end5 +
+      state.progressByType.sq +
+      state.progressByType.x11
+    ) / 3;
+  }
+
+  /* ---------- UI ---------- */
+  function flashProg(direction) {
+    el.prog.classList.remove('up', 'down');
+    void el.prog.offsetWidth;
+    el.prog.classList.add(direction);
+    if (state.progFlashTimer) clearTimeout(state.progFlashTimer);
+    state.progFlashTimer = setTimeout(() => {
+      el.prog.classList.remove('up', 'down');
+    }, 450);
+  }
+
+  function updateHUD() {
+    el.score.textContent = state.score;
+    el.streak.textContent = state.streak;
+    el.prog.textContent = Math.round(state.progress * 100) + '%';
+    const bestVal = Math.max(getBest(state.difficulty.key), state.score);
+    el.best.textContent = bestVal;
+  }
+
+  function updateTimerUI() {
+    const max = state.difficulty.max;
+    const pct = Math.max(0, Math.min(100, state.timeLeft / max * 100));
+    el.timerFill.style.width = pct + '%';
+    el.timerText.textContent = Math.max(0, state.timeLeft).toFixed(1);
+    const ratio = state.timeLeft / max;
+    el.timerFill.classList.toggle('warn', ratio <= 0.5 && ratio > 0.2);
+    el.timerFill.classList.toggle('bad', ratio <= 0.2);
+  }
+
+  function updateSessionUI() {
+    const remaining = Math.max(0, SESSION_LIMIT_SEC - state.sessionElapsed);
+    el.sessionText.textContent = fmt(state.sessionElapsed) + ' / ' + fmt(SESSION_LIMIT_SEC);
+    el.sessionText.classList.toggle('warn', remaining <= 60 && remaining > 20);
+    el.sessionText.classList.toggle('bad', remaining <= 20);
+  }
+
+  function flash(kind) {
+    el.flash.classList.remove('good', 'bad');
+    el.flash.classList.add(kind, 'show');
+    requestAnimationFrame(() => {
+      setTimeout(() => el.flash.classList.remove('show'), 30);
+    });
+  }
+
+  function showFeedback(text, kind) {
+    el.feedback.textContent = text || '';
+    el.feedback.className = 'feedback' + (kind ? ' ' + kind : '');
+  }
+
+  function renderDiffButtons() {
+    const buttons = el.diffGrid.querySelectorAll('.diff-btn');
+    buttons.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.diff === selectedDiff);
+    });
+    el.bestStart.textContent = getBest(selectedDiff);
+    el.best.textContent = getBest(selectedDiff);
+  }
+
+  function selectDiff(key) {
+    if (!DIFFICULTIES[key]) return;
+    selectedDiff = key;
+    state.difficulty = DIFFICULTIES[key];
+    try { localStorage.setItem('speedmath_diff', key); } catch (e) {}
+    renderDiffButtons();
+    if (!state.running) {
+      state.timeLeft = state.difficulty.start;
+      updateTimerUI();
+    }
+  }
+
+  /* ---------- Игровой цикл ---------- */
+  function nextTask() {
+    const recentSet = new Set(state.recent);
+    const types = ['end5', 'sq', 'x11'];
+
+    // Вес типа: отставание по количеству + сглаженная доля ошибок
+    const maxTotal = Math.max(
+      1,
+      state.stats.end5.total,
+      state.stats.sq.total,
+      state.stats.x11.total
+    );
+
+    const weights = {};
+    for (const t of types) {
+      const st = state.stats[t];
+      const lagging = maxTotal - st.total;
+      const errRate = smoothedErrorRate(t);
+      weights[t] = (lagging + 1) + errRate * ERROR_WEIGHT;
+    }
+
+    // Выбор типа: 70% — взвешенно, 30% — случайно
+    let preferredType;
+    if (Math.random() < 0.7) {
+      const totalWeight = types.reduce((s, t) => s + weights[t], 0);
+      let r = Math.random() * totalWeight;
+      for (const t of types) {
+        r -= weights[t];
+        if (r <= 0) { preferredType = t; break; }
+      }
+      if (!preferredType) preferredType = types[types.length - 1];
+    } else {
+      preferredType = types[randInt(0, types.length - 1)];
+    }
+
+    // Порядок попыток: сначала preferred, потом остальные по весу
+    const otherTypes = types
+      .filter(t => t !== preferredType)
+      .sort((a, b) => weights[b] - weights[a]);
+    const tryOrder = [preferredType, ...otherTypes];
+
+    // Ищем пример, которого не было в буфере недавних
+    let task = null;
+    outer:
+    for (const t of tryOrder) {
+      const gen = GENERATORS_BY_TYPE[t];
+      const p = state.progressByType[t];
+      for (let attempt = 0; attempt < 25; attempt++) {
+        const candidate = gen(p);
+        if (!recentSet.has(candidate.key)) {
+          task = candidate;
+          break outer;
+        }
+      }
+    }
+
+    if (!task) {
+      const t = preferredType;
+      task = GENERATORS_BY_TYPE[t](state.progressByType[t]);
+    }
+
+    state.current = task;
+    el.task.textContent = state.current.text;
+    el.answer.value = '';
+    el.answer.disabled = false;
+    el.answer.focus();
+    state.taskStart = performance.now();
+    state.locked = false;
+  }
+
+  function submitAnswer() {
+    if (!state.running || state.locked) return;
+    const raw = el.answer.value.trim();
+    if (!raw) return;
+    const val = parseInt(raw, 10);
+    if (isNaN(val)) return;
+
+    const elapsed = (performance.now() - state.taskStart) / 1000;
+    const type = state.current.type;
+    const diff = state.difficulty;
+    state.stats[type].total++;
+
+    if (val === state.current.answer) {
+      // Правильно
+      state.stats[type].correct++;
+      state.stats[type].time += elapsed;
+      state.totalCorrect++;
+      state.totalTimeCorrect += elapsed;
+      state.streak++;
+      if (state.streak > state.bestStreak) state.bestStreak = state.streak;
+
+      let pts = 10;
+      pts += Math.max(0, 10 - Math.floor(elapsed * 2));
+      pts += state.streak * 2;
+      state.score += pts;
+
+      state.timeLeft = Math.min(diff.max, state.timeLeft + diff.bonus);
+
+      // Прогресс только этого типа
+      const before = state.progressByType[type];
+      state.effectiveCountByType[type] = Math.min(
+        state.effectiveCountByType[type] + 1,
+        state.stats[type].correct
+      );
+      state.progressByType[type] = progress(state.effectiveCountByType[type], diff.growth);
+      recomputeAvgProgress();
+      if (state.progressByType[type] > before + 0.001) flashProg('up');
+
+      pushResult(type, true);
+      pushRecent(state.current.key);
+
+      flash('good');
+      updateHUD();
+      updateTimerUI();
+      nextTask();
+    } else {
+      // Ошибка
+      state.totalWrong++;
+      state.stats[type].wrong++;
+      state.streak = 0;
+      state.timeLeft = Math.max(0, state.timeLeft - diff.penalty);
+
+      const before = state.progressByType[type];
+      state.effectiveCountByType[type] = Math.max(
+        0,
+        state.effectiveCountByType[type] - diff.regress
+      );
+      state.progressByType[type] = progress(state.effectiveCountByType[type], diff.growth);
+      recomputeAvgProgress();
+      if (state.progressByType[type] < before - 0.001) flashProg('down');
+
+      pushResult(type, false);
+      pushRecent(state.current.key);
+
+      flash('bad');
+      updateHUD();
+      updateTimerUI();
+
+      state.locked = true;
+      el.answer.disabled = true;
+      showFeedback('Правильно: ' + state.current.answer + '. ' + state.current.hint, 'bad');
+      el.hintBtn.disabled = true;
+
+      setTimeout(() => {
+        if (!state.running) return;
+        el.hintBtn.disabled = false;
+        nextTask();
+      }, 1700);
+    }
+  }
+
+  function useHint() {
+    if (!state.running || state.locked) return;
+    state.timeLeft = Math.max(0, state.timeLeft - HINT_COST);
+    updateTimerUI();
+    showFeedback(state.current.hint, '');
+    el.answer.focus();
+  }
+
+  function tick(now) {
+    if (!state.running) return;
+    if (!state.lastTick) state.lastTick = now;
+    const dt = (now - state.lastTick) / 1000;
+    state.lastTick = now;
+
+    state.timeLeft -= dt;
+    state.sessionElapsed = (now - state.sessionStart) / 1000;
+
+    if (state.sessionElapsed >= SESSION_LIMIT_SEC) {
+      state.timeLeft = Math.max(0, state.timeLeft);
+      updateTimerUI();
+      updateSessionUI();
+      endGame('session');
+      return;
+    }
+
+    if (state.timeLeft <= 0) {
+      state.timeLeft = 0;
+      updateTimerUI();
+      updateSessionUI();
+      endGame('timer');
+      return;
+    }
+
+    updateTimerUI();
+    updateSessionUI();
+    state.rafId = requestAnimationFrame(tick);
+  }
+
+  /* ---------- Старт / конец ---------- */
+  function startGame() {
+    state.difficulty = DIFFICULTIES[selectedDiff];
+    state.running = true;
+    state.timeLeft = state.difficulty.start;
+    state.score = 0;
+    state.streak = 0;
+    state.bestStreak = 0;
+    state.totalCorrect = 0;
+    state.totalWrong = 0;
+    state.totalTimeCorrect = 0;
+    state.progress = 0;
+    state.progressByType = { end5: 0, sq: 0, x11: 0 };
+    state.effectiveCountByType = { end5: 0, sq: 0, x11: 0 };
+    state.recentResults = { end5: [], sq: [], x11: [] };
+    state.recent = [];
+    state.lastTick = 0;
+    state.locked = false;
+    state.sessionStart = performance.now();
+    state.sessionElapsed = 0;
+    state.endReason = '';
+    state.stats = {
+      end5: { total: 0, correct: 0, wrong: 0, time: 0 },
+      sq:   { total: 0, correct: 0, wrong: 0, time: 0 },
+      x11:  { total: 0, correct: 0, wrong: 0, time: 0 }
+    };
+
+    el.startScreen.classList.add('hidden');
+    el.endScreen.classList.add('hidden');
+    el.hintBtn.disabled = false;
+
+    updateHUD();
+    updateTimerUI();
+    updateSessionUI();
+    nextTask();
+
+    state.rafId = requestAnimationFrame(tick);
+  }
+
+  function endGame(reason) {
+    state.running = false;
+    state.endReason = reason || 'timer';
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    el.answer.disabled = true;
+
+    const diff = state.difficulty;
+    const prevBest = getBest(diff.key);
+    let newBest = prevBest;
+    if (state.score > prevBest) {
+      newBest = state.score;
+      setBest(diff.key, newBest);
+    }
+    el.best.textContent = newBest;
+
+    const titles = {
+      timer: 'Время вышло',
+      session: 'Отличный заплыв!'
+    };
+    const reasons = {
+      timer: 'игровой таймер',
+      session: 'лимит сессии 5:00'
+    };
+    $('endTitle').textContent = titles[state.endReason] || 'Игра окончена';
+    $('finalReason').textContent = reasons[state.endReason] || '—';
+
+    $('finalScore').textContent = state.score;
+    $('finalDiff').textContent = diff.label;
+    $('finalProgress').textContent = Math.round(state.progress * 100) + '%';
+    $('finalCorrect').textContent = state.totalCorrect;
+    $('finalWrong').textContent = state.totalWrong;
+    $('finalStreak').textContent = state.bestStreak;
+
+    const totalTasks = state.totalCorrect + state.totalWrong;
+    const accuracy = totalTasks ? Math.round(state.totalCorrect / totalTasks * 100) : 0;
+    $('finalAccuracy').textContent = totalTasks ? accuracy + '%' : '—';
+
+    const avg = state.totalCorrect ? (state.totalTimeCorrect / state.totalCorrect) : 0;
+    $('finalAvg').textContent = state.totalCorrect ? avg.toFixed(2) + ' с' : '—';
+
+    $('finalDuration').textContent = fmt(state.sessionElapsed);
+
+    $('statEnd5').textContent = state.stats.end5.correct + ' / ' + state.stats.end5.wrong;
+    $('statSq').textContent   = state.stats.sq.correct   + ' / ' + state.stats.sq.wrong;
+    $('statX11').textContent  = state.stats.x11.correct  + ' / ' + state.stats.x11.wrong;
+
+    $('finalProgEnd5').textContent = Math.round(state.progressByType.end5 * 100) + '%';
+    $('finalProgSq').textContent   = Math.round(state.progressByType.sq   * 100) + '%';
+    $('finalProgX11').textContent  = Math.round(state.progressByType.x11  * 100) + '%';
+
+    $('finalBest').textContent = newBest;
+
+    el.endScreen.classList.remove('hidden');
+  }
+
+  function goMenu() {
+    state.running = false;
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    el.endScreen.classList.add('hidden');
+    el.startScreen.classList.remove('hidden');
+    renderDiffButtons();
+    state.timeLeft = state.difficulty.start;
+    state.sessionElapsed = 0;
+    updateTimerUI();
+    updateSessionUI();
+  }
+
+  /* ---------- Слушатели ---------- */
+  el.diffGrid.addEventListener('click', e => {
+    const btn = e.target.closest('.diff-btn');
+    if (!btn) return;
+    selectDiff(btn.dataset.diff);
+  });
+
+  $('playBtn').addEventListener('click', startGame);
+  $('againBtn').addEventListener('click', startGame);
+  $('menuBtn').addEventListener('click', goMenu);
+  el.hintBtn.addEventListener('click', useHint);
+
+  el.answer.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitAnswer();
+    }
+  });
+
+  el.answer.addEventListener('input', () => {
+    el.answer.value = el.answer.value.replace(/[^0-9]/g, '');
+  });
+
+  /* ---------- Инициализация ---------- */
+  selectDiff(selectedDiff);
+  updateHUD();
+  updateSessionUI();
+})();
+</script>
+</body>
+</html>
